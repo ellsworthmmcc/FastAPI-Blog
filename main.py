@@ -1,6 +1,9 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 app = FastAPI()
 
@@ -11,15 +14,15 @@ templates = Jinja2Templates(directory="templates")
 posts: list[dict] = [
     {
         "id": 1,
-        "author": "Example Author",
-        "title": "Examle Title",
+        "author": "Example Author 1",
+        "title": "Example Title 1",
         "content": "Example Content",
         "date_posted": "January 1, 2020",
     },
     {
         "id": 2,
-        "author": "Example Author",
-        "title": "Examle Title",
+        "author": "Example Author ",
+        "title": "Example Title 2",
         "content": "Example Content",
         "date_posted": "January 1, 2020",
     },
@@ -32,10 +35,77 @@ def home(request: Request):
     return templates.TemplateResponse(
         request=request,
         name="home.html",
-        context={"posts": posts, "title": "Home"}
-        )
+        context={"posts": posts, "title": "Home"})
+
+
+@app.get("/posts/{post_id}", include_in_schema=False)
+def post_page(request: Request, post_id: int):
+    for post in posts:
+        if post.get('id') == post_id:
+            title: str = post['title'][:50]
+            return templates.TemplateResponse(
+                request=request,
+                name="post.html",
+                context={"post": post, "title": title})
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Post not found")
 
 
 @app.get("/api/posts")
 def get_posts():
     return posts
+
+
+@app.get("/api/posts/{post_id}")
+def get_post(post_id: int):
+    for post in posts:
+        if post.get("id") == post_id:
+            return post
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Post not found")
+
+
+@app.exception_handler(StarletteHTTPException)
+def general_http_exception_handler(request: Request, exception: StarletteHTTPException):
+    message = (
+        exception.detail
+        if exception.detail
+        else "An error occurred. Please check your request and try again."
+    )
+
+    if request.url.path.startswith("/api"):
+        return JSONResponse(
+            status_code=exception.status_code,
+            content={"detail": message},
+        )
+    return templates.TemplateResponse(
+        request,
+        "error.html",
+        {
+            "status_code": exception.status_code,
+            "title": exception.status_code,
+            "message": message,
+        },
+        status_code=exception.status_code,
+    )
+
+
+@app.exception_handler(RequestValidationError)
+def validation_exception_handler(request: Request, exception: RequestValidationError):
+    if request.url.path.startswith("/api"):
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={"detail": exception.errors()},
+        )
+    return templates.TemplateResponse(
+        request,
+        "error.html",
+        {
+            "status_code": status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "title": status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "message": "Invalid request. Please check your input and try again.",
+        },
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+    )
